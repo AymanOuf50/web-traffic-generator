@@ -1,48 +1,37 @@
 #!/usr/bin/python
 
-#
-# written by @eric_capuano
-# https://github.com/ecapuano/web-traffic-generator
-#
-# published under MIT license :) do what you want.
-#
-
-# 20170714 shyft ADDED python 2.7 and 3.x compatibility and generic config
-# 20200225 rarawls ADDED recursive, depth-first browsing, color stdout
 from __future__ import print_function
 import requests
 import re
 import time
 import random
-try:
-    import config
-except ImportError:
-    
-    class ConfigClass:  # minimal config incase you don't have the config.py
-        MAX_DEPTH = 10  # dive no deeper than this for each root URL
-        MIN_DEPTH = 3   # dive at least this deep into each root URL
-        MAX_WAIT = 10   # maximum amount of time to wait between HTTP requests
-        MIN_WAIT = 5    # minimum amount of time allowed between HTTP requests
-        DEBUG = False    # set to True to enable useful console output
 
-        # use this single item list to test how a site responds to this crawler
-        # be sure to comment out the list below it.
-        #ROOT_URLS = ["https://digg.com/"]
-        ROOT_URLS = [
-            "https://www.reddit.com"
-        ]
+# Configuration minimale en cas d'absence de config.py
+class ConfigClass:
+    MAX_DEPTH = 10  # Niveau maximum de profondeur
+    MIN_DEPTH = 3   # Niveau minimum de profondeur
+    MAX_WAIT = 10   # Temps max entre les requêtes
+    MIN_WAIT = 5    # Temps min entre les requêtes
+    DEBUG = False   # Activer/désactiver les messages de débogage
+    ROOT_URLS = [
+        "https://www.example.com"
+    ]
+    blacklist = [
+        'facebook.com',
+        'pinterest.com'
+    ]
+    USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_3) ' \
+        'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'
 
-        # items can be a URL "https://t.co" or simple string to check for "amazon"
-        blacklist = [
-            'facebook.com',
-            'pinterest.com'
-        ]
+config = ConfigClass
 
-        # must use a valid user agent or sites will hate you
-        USER_AGENT = 'Mozilla/5.0 (Macintosh; Intel Mac OS X 10_12_3) ' \
-            'AppleWebKit/537.36 (KHTML, like Gecko) Chrome/56.0.2924.87 Safari/537.36'
-    config = ConfigClass
-
+# Liste des proxies
+proxies_list = [
+    'http://proxy1_ip:proxy1_port',
+    'http://proxy2_ip:proxy2_port',
+    'http://proxy3_ip:proxy3_port',
+    # Ajoutez autant de proxies que nécessaire
+]
 
 class Colors:
     RED = '\033[91m'
@@ -50,146 +39,109 @@ class Colors:
     PURPLE = '\033[95m'
     NONE = '\033[0m'
 
-
 def debug_print(message, color=Colors.NONE):
-    """ A method which prints if DEBUG is set """
     if config.DEBUG:
         print(color + message + Colors.NONE)
 
-
 def hr_bytes(bytes_, suffix='B', si=False):
-    """ A method providing a more legible byte format """
-
     bits = 1024.0 if si else 1000.0
-
     for unit in ['', 'K', 'M', 'G', 'T', 'P', 'E', 'Z']:
         if abs(bytes_) < bits:
             return "{:.1f}{}{}".format(bytes_, unit, suffix)
         bytes_ /= bits
     return "{:.1f}{}{}".format(bytes_, 'Y', suffix)
 
+def get_random_proxy():
+    """Sélectionne un proxy aléatoire dans la liste."""
+    return random.choice(proxies_list)
 
 def do_request(url):
-    """ A method which loads a page """
-
     global data_meter
     global good_requests
     global bad_requests
 
-    debug_print("  Requesting page...".format(url))
+    debug_print("Requesting page... {}".format(url))
 
     headers = {'user-agent': config.USER_AGENT}
+    proxy = get_random_proxy()  # Obtenez un proxy aléatoire
 
     try:
-        r = requests.get(url, headers=headers, timeout=5)
-    except:
-        # Prevent 100% CPU loop in a net down situation
-        time.sleep(30)
+        r = requests.get(url, headers=headers, proxies={'http': proxy, 'https': proxy}, timeout=5)
+    except Exception as e:
+        debug_print(f"Proxy failed: {proxy}. Error: {e}", Colors.RED)
+        bad_requests += 1
         return False
 
     page_size = len(r.content)
     data_meter += page_size
 
-    debug_print("  Page size: {}".format(hr_bytes(page_size)))
-    debug_print("  Data meter: {}".format(hr_bytes(data_meter)))
+    debug_print("Page size: {}".format(hr_bytes(page_size)))
+    debug_print("Data meter: {}".format(hr_bytes(data_meter)))
 
     status = r.status_code
 
-    if (status != 200):
+    if status != 200:
         bad_requests += 1
-        debug_print("  Response status: {}".format(r.status_code), Colors.RED)
-        if (status == 429):
-            debug_print(
-                "  We're making requests too frequently... sleeping longer...")
+        debug_print("Response status: {}".format(r.status_code), Colors.RED)
+        if status == 429:
+            debug_print("Too many requests... sleeping longer...")
             config.MIN_WAIT += 10
             config.MAX_WAIT += 10
     else:
         good_requests += 1
 
-    debug_print("  Good requests: {}".format(good_requests))
-    debug_print("  Bad reqeusts: {}".format(bad_requests))
+    debug_print("Good requests: {}".format(good_requests))
+    debug_print("Bad requests: {}".format(bad_requests))
 
     return r
 
-
 def get_links(page):
-    """ A method which returns all links from page, less blacklisted links """
-
     pattern = r"(?:href\=\")(https?:\/\/[^\"]+)(?:\")"
     links = re.findall(pattern, str(page.content))
-    valid_links = [link for link in links if not any(
-        b in link for b in config.blacklist)]
+    valid_links = [link for link in links if not any(b in link for b in config.blacklist)]
     return valid_links
 
-
 def recursive_browse(url, depth):
-    """ A method which recursively browses URLs, using given depth """
-    # Base: load current page and return
-    # Recursively: load page, pick random link and browse with decremented depth
-
-    debug_print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
-    debug_print(
-        "Recursively browsing [{}] ~~~ [depth = {}]".format(url, depth))
-
-    if not depth:  # base case: depth of zero, load page
-
+    debug_print("Recursively browsing [{}] ~~~ [depth = {}]".format(url, depth))
+    if not depth:
         do_request(url)
         return
-
-    else:  # recursive case: load page, browse random link, decrement depth
-
-        page = do_request(url)  # load current page
-
-        # give up if error loading page
+    else:
+        page = do_request(url)
         if not page:
-            debug_print(
-                "  Stopping and blacklisting: page error".format(url), Colors.YELLOW)
+            debug_print("Stopping and blacklisting: page error".format(url), Colors.YELLOW)
             config.blacklist.append(url)
             return
 
-        # scrape page for links not in blacklist
-        debug_print("  Scraping page for links".format(url))
+        debug_print("Scraping page for links".format(url))
         valid_links = get_links(page)
-        debug_print("  Found {} valid links".format(len(valid_links)))
+        debug_print("Found {} valid links".format(len(valid_links)))
 
-        # give up if no links to browse
         if not valid_links:
-            debug_print("  Stopping and blacklisting: no links".format(
-                url), Colors.YELLOW)
+            debug_print("Stopping and blacklisting: no links".format(url), Colors.YELLOW)
             config.blacklist.append(url)
             return
 
-        # sleep and then recursively browse
         sleep_time = random.randrange(config.MIN_WAIT, config.MAX_WAIT)
-        debug_print("  Pausing for {} seconds...".format(sleep_time))
+        debug_print("Pausing for {} seconds...".format(sleep_time))
         time.sleep(sleep_time)
 
         recursive_browse(random.choice(valid_links), depth - 1)
 
-
 if __name__ == "__main__":
-
-    # Initialize global variables
     data_meter = 0
     good_requests = 0
     bad_requests = 0
 
     print("~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~~")
     print("Traffic generator started")
-    print("https://github.com/ecapuano/web-traffic-generator")
     print("Diving between 3 and {} links deep into {} root URLs,".format(
         config.MAX_DEPTH, len(config.ROOT_URLS)))
-    print("Waiting between {} and {} seconds between requests. ".format(
+    print("Waiting between {} and {} seconds between requests.".format(
         config.MIN_WAIT, config.MAX_WAIT))
     print("This script will run indefinitely. Ctrl+C to stop.")
 
     while True:
-
-        debug_print("Randomly selecting one of {} Root URLs".format(
-            len(config.ROOT_URLS)), Colors.PURPLE)
-
         random_url = random.choice(config.ROOT_URLS)
         depth = random.choice(range(config.MIN_DEPTH, config.MAX_DEPTH))
-
         recursive_browse(random_url, depth)
-
