@@ -27,10 +27,14 @@ config = ConfigClass
 
 # Liste des proxies
 proxies_list = [
-    'http://proxy1_ip:proxy1_port',
-    'http://proxy2_ip:proxy2_port',
-    'http://proxy3_ip:proxy3_port',
-    # Ajoutez autant de proxies que nécessaire
+    'http://8.218.117.116:8080',
+    'http://72.10.160.172:8080',
+    'http://95.154.20.113:3128',
+    'http://202.142.145.179:8080',
+    'http://89.221.215.128:1080',
+    'http://41.74.91.244:8080',
+    'http://68.178.168.41:3128',
+    'http://93.93.246.218:1080'
 ]
 
 class Colors:
